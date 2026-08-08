@@ -1,21 +1,26 @@
 import "./style.css";
 import type { Difficulty } from "@core/Difficulty";
 import { difficultyLabel } from "@core/Difficulty";
-import { PerformanceClock } from "@core/GameClock";
+import { PerformanceClock, type SongClock } from "@core/GameClock";
 import { GameSession } from "@core/GameSession";
 import { DRUM_LANES } from "@chart/LaneConfiguration";
-import { generateTestChart } from "@chart/TestChart";
+import { generateTestChart, TEST_CHART_MEASURES } from "@chart/TestChart";
 import { loadJSON } from "@chart/ChartLoader";
 import { getDifficultyNotes } from "@chart/SongChart";
 import { RhythmGameScene } from "@gameplay/RhythmGameScene";
+import { COUNTDOWN_LEAD_SECONDS } from "@gameplay/Countdown";
+import { AudioEngine } from "@audio/AudioEngine";
+import { SongPlayer } from "@audio/SongPlayer";
+import { AudioSyncManager } from "@audio/AudioSyncManager";
+import { synthesizeTestBeat } from "@audio/TestBeatSynth";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
-  <div class="rotate-prompt">Rotate your phone to landscape to play.</div>
+  <div class="rotate-prompt">Rotate your phone to portrait to play.</div>
   <div class="game-root">
     <div class="difficulty-select" id="difficulty-select">
       <h1>ROCK BAND WEB</h1>
-      <div class="subtitle">Test Pattern — Drums</div>
+      <div class="subtitle" id="subtitle">Test Pattern — Drums</div>
       <div class="difficulty-buttons">
         <button class="easy" data-difficulty="easy">EASY</button>
         <button class="medium" data-difficulty="medium">MEDIUM</button>
@@ -32,16 +37,52 @@ const rawChart = JSON.parse(JSON.stringify(generateTestChart()));
 const compiledChart = loadJSON(rawChart, DRUM_LANES);
 
 const difficultySelect = document.getElementById("difficulty-select")!;
+const subtitle = document.getElementById("subtitle")!;
 const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
+const buttons = document.querySelectorAll<HTMLButtonElement>("[data-difficulty]");
 
 let activeScene: RhythmGameScene | null = null;
+let audioEngine: AudioEngine | null = null;
 
-function startGame(difficulty: Difficulty): void {
+/**
+ * Web Audio requires the AudioContext to be created/resumed from within a
+ * user-gesture handler on iOS — this is that handler. Falls back to the
+ * Phase 1 performance-clock (silent) if audio setup fails for any reason,
+ * so a synthesis or decode error never leaves the game unplayable.
+ */
+async function createClock(): Promise<SongClock> {
+  try {
+    audioEngine ??= new AudioEngine();
+    await audioEngine.resume();
+
+    const buffer = await synthesizeTestBeat(audioEngine.context, {
+      bpm: rawChart.bpm,
+      beatsPerMeasure: rawChart.beatsPerMeasure,
+      offsetSeconds: rawChart.offset,
+      measureCount: TEST_CHART_MEASURES,
+    });
+
+    const player = new SongPlayer(audioEngine.context, buffer);
+    return new AudioSyncManager(player, COUNTDOWN_LEAD_SECONDS);
+  } catch (error) {
+    console.error("Audio setup failed, falling back to a silent clock.", error);
+    return new PerformanceClock();
+  }
+}
+
+async function startGame(difficulty: Difficulty): Promise<void> {
+  for (const button of buttons) button.disabled = true;
+  subtitle.textContent = "Loading…";
+
+  const clock = await createClock();
+
   difficultySelect.classList.add("hidden");
   canvas.classList.remove("hidden");
+  for (const button of buttons) button.disabled = false;
+  subtitle.textContent = "Test Pattern — Drums";
 
   const notes = getDifficultyNotes(compiledChart, difficulty);
-  const session = new GameSession(notes, new PerformanceClock(), DRUM_LANES);
+  const session = new GameSession(notes, clock, DRUM_LANES);
 
   activeScene?.destroy();
   activeScene = new RhythmGameScene(canvas, session, DRUM_LANES);
@@ -50,8 +91,8 @@ function startGame(difficulty: Difficulty): void {
   document.title = `Rock Band Web — ${difficultyLabel(difficulty)}`;
 }
 
-for (const button of document.querySelectorAll<HTMLButtonElement>("[data-difficulty]")) {
+for (const button of buttons) {
   button.addEventListener("click", () => {
-    startGame(button.dataset.difficulty as Difficulty);
+    void startGame(button.dataset.difficulty as Difficulty);
   });
 }

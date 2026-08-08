@@ -6,6 +6,7 @@ import { DEFAULT_LEAD_TIME_SECONDS, drawNote, noteProgress, noteY } from "./Note
 import { DrumPad } from "./DrumPad";
 import { FeedbackRenderer } from "./FeedbackRenderer";
 import { ParticleEffects } from "./ParticleEffects";
+import { countdownLabel } from "./Countdown";
 import { TouchInputManager } from "@input/TouchInputManager";
 
 const PAD_GAP = 10;
@@ -34,6 +35,10 @@ export class RhythmGameScene {
 
     this.resize();
     window.addEventListener("resize", this.resize);
+    // iOS Safari's address/toolbar showing or hiding often only fires a
+    // visualViewport resize, not a window resize — without this the canvas
+    // (and pad hit-rects) can drift out of sync with what's actually visible.
+    window.visualViewport?.addEventListener("resize", this.resize);
 
     this.input = new TouchInputManager(canvas, this.pads, this.handlePadDown, this.handlePadUp);
     this.session.onJudgment(this.handleJudgment);
@@ -48,6 +53,7 @@ export class RhythmGameScene {
   destroy(): void {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener("resize", this.resize);
+    window.visualViewport?.removeEventListener("resize", this.resize);
     this.input.destroy();
   }
 
@@ -140,6 +146,23 @@ export class RhythmGameScene {
     this.drawHud(width);
     this.feedback.draw(ctx, nowMs);
     this.particles.draw(ctx, nowMs);
+    this.drawCountdown(width, height);
+  }
+
+  private drawCountdown(width: number, height: number): void {
+    const label = countdownLabel(-this.session.currentTime);
+    if (!label) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `bold ${label === "ROCK!" ? Math.round(width * 0.16) : Math.round(width * 0.28)}px system-ui, sans-serif`;
+    ctx.shadowColor = "rgba(0,0,0,0.7)";
+    ctx.shadowBlur = 20;
+    ctx.fillText(label, width / 2, height / 2);
+    ctx.restore();
   }
 
   private drawStage(width: number, height: number): void {

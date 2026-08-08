@@ -2,6 +2,8 @@ import type { MusicalNote, SubdivisionName } from "./MusicalTime";
 import type { NoteType } from "./NoteType";
 import type { SongChart } from "./SongChart";
 
+export const TEST_CHART_MEASURES = 16;
+
 function mk(
   measure: number,
   beat: number,
@@ -18,7 +20,7 @@ function mk(
  * difficulty (not derived from each other) to exercise chords, syncopation,
  * and density the way a real chart eventually will.
  */
-export function generateTestChart(measureCount = 16): SongChart {
+export function generateTestChart(measureCount = TEST_CHART_MEASURES): SongChart {
   const easy: MusicalNote[] = [];
   const medium: MusicalNote[] = [];
   const hard: MusicalNote[] = [];

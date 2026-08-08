@@ -11,9 +11,15 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100%;
+  /* vh is a fallback for browsers without dvh support; dvh (below) tracks the
+     *visible* viewport as Safari's address/toolbar show and hide, so content
+     never extends underneath browser chrome. */
+  height: 100vh;
+  height: 100dvh;
   background: #050508;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
   font-family: system-ui, -apple-system, sans-serif;
 }
 
@@ -22,10 +28,22 @@ body {
   inset: 0;
 }
 
+.game-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  /* Keeps the drum pads clear of the home-indicator gesture strip so a tap
+     there can't be swallowed by the system instead of the game. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 .game-canvas {
   display: block;
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  touch-action: none;
 }
 
 .rotate-prompt {
@@ -42,7 +60,8 @@ body {
   padding: 2rem;
 }
 
-@media (orientation: portrait) {
+/* The 2009 iPhone Rock Band was portrait-only; require portrait here too. */
+@media (orientation: landscape) {
   .rotate-prompt {
     display: flex;
   }
