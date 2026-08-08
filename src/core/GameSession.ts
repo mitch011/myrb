@@ -9,7 +9,10 @@ import { classifyDelta, maxJudgeableWindowSeconds } from "./TimingEngine";
 import { ScoreEngine } from "./ScoreEngine";
 import { ComboEngine } from "./ComboEngine";
 import { OverdriveEngine } from "./OverdriveEngine";
+import { PerformanceMeter } from "./PerformanceMeter";
+import { starsForAccuracy } from "./StarRating";
 import type { GameState } from "./GameState";
+import type { PlayStats } from "@models/Score";
 
 export interface JudgmentEvent {
   judgment: Judgment;
@@ -23,6 +26,13 @@ export interface JudgmentEvent {
 
 export type JudgmentListener = (event: JudgmentEvent) => void;
 
+export interface GameSessionOptions {
+  timingWindows?: TimingWindowsMs;
+  noFailMode?: boolean;
+  /** Seconds added to (now - note.timestamp) before judging — see Settings.calibrationOffsetSeconds. */
+  calibrationOffsetSeconds?: number;
+}
+
 /**
  * Orchestrates a single play-through: owns the authoritative clock, the
  * runtime note state, and the score/combo engines. The renderer and input
@@ -33,19 +43,35 @@ export class GameSession {
   readonly scoreEngine = new ScoreEngine();
   readonly comboEngine = new ComboEngine();
   readonly overdriveEngine = new OverdriveEngine();
+  readonly performanceMeter: PerformanceMeter;
   state: GameState = "countdown";
 
   private judgmentListeners: JudgmentListener[] = [];
+  private readonly timingWindows: TimingWindowsMs;
+  private readonly calibrationOffsetSeconds: number;
   private readonly maxWindowSeconds: number;
+  private perfectCount = 0;
+  private greatCount = 0;
+  private goodCount = 0;
+  private missCount = 0;
 
   constructor(
     notes: Note[],
     private readonly clock: SongClock,
     private readonly laneConfig: LaneConfiguration,
-    private readonly timingWindows: TimingWindowsMs = DEFAULT_TIMING_WINDOWS
+    options: GameSessionOptions = {}
   ) {
+    const {
+      timingWindows = DEFAULT_TIMING_WINDOWS,
+      noFailMode = false,
+      calibrationOffsetSeconds = 0,
+    } = options;
+
     this.notes = toRuntimeNotes(notes);
+    this.timingWindows = timingWindows;
+    this.calibrationOffsetSeconds = calibrationOffsetSeconds;
     this.maxWindowSeconds = maxJudgeableWindowSeconds(timingWindows);
+    this.performanceMeter = new PerformanceMeter(undefined, noFailMode);
   }
 
   get currentTime(): number {
@@ -96,6 +122,11 @@ export class GameSession {
     this.scoreEngine.reset();
     this.comboEngine.reset();
     this.overdriveEngine.reset();
+    this.performanceMeter.reset();
+    this.perfectCount = 0;
+    this.greatCount = 0;
+    this.goodCount = 0;
+    this.missCount = 0;
     this.state = "playing";
     this.clock.restart();
   }
@@ -114,9 +145,30 @@ export class GameSession {
         this.emitJudgment("miss", note, now - note.timestamp);
       }
     }
-    if (this.isChartComplete()) {
+
+    if (this.performanceMeter.hasFailed) {
+      this.state = "failed";
+    } else if (this.isChartComplete()) {
       this.state = "finished";
     }
+  }
+
+  getResult(): PlayStats {
+    const totalNotes = this.notes.length;
+    const successfulHits = this.perfectCount + this.greatCount + this.goodCount;
+    const accuracyFraction = totalNotes > 0 ? successfulHits / totalNotes : 0;
+    return {
+      score: this.scoreEngine.score,
+      maxCombo: this.comboEngine.maxCombo,
+      perfectCount: this.perfectCount,
+      greatCount: this.greatCount,
+      goodCount: this.goodCount,
+      missCount: this.missCount,
+      totalNotes,
+      accuracyFraction,
+      stars: starsForAccuracy(accuracyFraction),
+      failed: this.performanceMeter.hasFailed,
+    };
   }
 
   isChartComplete(): boolean {
@@ -135,7 +187,7 @@ export class GameSession {
     );
     if (!candidate) return null;
 
-    const delta = now - candidate.timestamp;
+    const delta = now - candidate.timestamp + this.calibrationOffsetSeconds;
     const judgment = classifyDelta(delta, this.timingWindows);
     if (judgment === null) return null;
 
@@ -155,6 +207,22 @@ export class GameSession {
     deltaSeconds: number,
     pointsGained = 0
   ): JudgmentEvent {
+    this.performanceMeter.registerJudgment(judgment);
+    switch (judgment) {
+      case "perfect":
+        this.perfectCount++;
+        break;
+      case "great":
+        this.greatCount++;
+        break;
+      case "good":
+        this.goodCount++;
+        break;
+      case "miss":
+        this.missCount++;
+        break;
+    }
+
     const event: JudgmentEvent = {
       judgment,
       lane: note.lane,

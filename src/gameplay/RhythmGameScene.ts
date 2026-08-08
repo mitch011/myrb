@@ -1,4 +1,5 @@
 import type { GameSession, JudgmentEvent } from "@core/GameSession";
+import type { PlayStats } from "@models/Score";
 import type { LaneConfiguration } from "@chart/LaneConfiguration";
 import { computeLanes, type LaneGeometry } from "./Lane";
 import { computeHighwayGeometry, type HighwayGeometry } from "./HitZone";
@@ -28,11 +29,13 @@ export class RhythmGameScene {
   private overdriveButtonRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private lastFrameMs = 0;
   private rafId = 0;
+  private hasEnded = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly session: GameSession,
-    private readonly laneConfig: LaneConfiguration
+    private readonly laneConfig: LaneConfiguration,
+    private readonly onEnd?: (result: PlayStats, failed: boolean) => void
   ) {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("2D canvas context is not available.");
@@ -172,6 +175,11 @@ export class RhythmGameScene {
     this.particles.update(nowMs, dtSeconds);
     this.render(nowMs);
 
+    if (!this.hasEnded && (this.session.state === "finished" || this.session.state === "failed")) {
+      this.hasEnded = true;
+      this.onEnd?.(this.session.getResult(), this.session.state === "failed");
+    }
+
     if (this.session.state === "playing" || this.session.state === "countdown") {
       this.rafId = requestAnimationFrame(this.loop);
     }
@@ -191,6 +199,22 @@ export class RhythmGameScene {
     this.feedback.draw(ctx, nowMs);
     this.particles.draw(ctx, nowMs);
     this.drawCountdown(width, height);
+    if (this.session.state === "failed") this.drawFailedOverlay(width, height);
+  }
+
+  private drawFailedOverlay(width: number, height: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(5,5,10,0.72)";
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#e5383b";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `bold ${Math.round(width * 0.14)}px system-ui, sans-serif`;
+    ctx.shadowColor = "rgba(0,0,0,0.7)";
+    ctx.shadowBlur = 16;
+    ctx.fillText("YOU FAILED", width / 2, height / 2);
+    ctx.restore();
   }
 
   private drawCountdown(width: number, height: number): void {
@@ -298,7 +322,22 @@ export class RhythmGameScene {
     }
     ctx.restore();
 
+    this.drawPerformanceMeter(width);
     this.drawOverdriveIndicator();
+  }
+
+  private drawPerformanceMeter(width: number): void {
+    const ctx = this.ctx;
+    const fraction = this.session.performanceMeter.fraction;
+    const barHeight = 5;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(0, 0, width, barHeight);
+
+    ctx.fillStyle = fraction > 0.5 ? "#57cc99" : fraction > 0.25 ? "#ffd60a" : "#e5383b";
+    ctx.fillRect(0, 0, width * fraction, barHeight);
+    ctx.restore();
   }
 
   private drawOverdriveIndicator(): void {

@@ -70,7 +70,7 @@ body {
   }
 }
 
-.difficulty-select {
+.overlay-screen {
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -78,29 +78,35 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.5rem;
+  gap: 1.25rem;
+  padding: 2rem 1.5rem;
+  overflow-y: auto;
   background: radial-gradient(circle at center, #14141f 0%, #05050a 80%);
   color: #fff;
+  text-align: center;
 }
 
-.difficulty-select h1 {
+.overlay-screen h1 {
   font-size: 1.6rem;
   letter-spacing: 0.15em;
   margin: 0;
 }
 
-.difficulty-select .subtitle {
+.overlay-screen .subtitle {
   opacity: 0.6;
-  margin-top: -1rem;
+  margin-top: -0.75rem;
   font-size: 0.95rem;
 }
 
-.difficulty-buttons {
+.action-buttons {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 1rem;
 }
 
-.difficulty-buttons button {
+.action-buttons button,
+.text-button {
   font: inherit;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -112,18 +118,83 @@ body {
   cursor: pointer;
 }
 
-.difficulty-buttons button:active {
+.action-buttons button:active,
+.text-button:active {
   transform: scale(0.96);
 }
 
-.difficulty-buttons button.easy {
+.action-buttons button.easy {
   border-color: #57cc99;
 }
-.difficulty-buttons button.medium {
+.action-buttons button.medium {
   border-color: #ffd60a;
 }
-.difficulty-buttons button.hard {
+.action-buttons button.hard {
   border-color: #e5383b;
+}
+
+.text-button {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.15);
+  font-size: 0.85rem;
+  padding: 0.5rem 1.2rem;
+  opacity: 0.75;
+}
+
+.best-result {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  min-height: 1.2em;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  width: min(320px, 80vw);
+  text-align: left;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.settings-row.checkbox {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-row input[type="range"] {
+  width: 100%;
+}
+
+.results-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 1.5rem;
+  font-size: 0.95rem;
+  text-align: left;
+  width: min(320px, 80vw);
+}
+
+.results-stats .label {
+  opacity: 0.6;
+}
+
+.results-stars {
+  font-size: 1.8rem;
+  letter-spacing: 0.2em;
+  color: #ffd60a;
+}
+
+.results-failed {
+  color: #e5383b;
+  font-weight: 700;
+  letter-spacing: 0.1em;
 }
 
 .hidden {
