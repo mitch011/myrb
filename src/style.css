@@ -1,0 +1,112 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #050508;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.rotate-prompt {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #05050a;
+  color: #fff;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 1.2rem;
+  padding: 2rem;
+}
+
+@media (orientation: portrait) {
+  .rotate-prompt {
+    display: flex;
+  }
+  .game-root {
+    visibility: hidden;
+  }
+}
+
+.difficulty-select {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  background: radial-gradient(circle at center, #14141f 0%, #05050a 80%);
+  color: #fff;
+}
+
+.difficulty-select h1 {
+  font-size: 1.6rem;
+  letter-spacing: 0.15em;
+  margin: 0;
+}
+
+.difficulty-select .subtitle {
+  opacity: 0.6;
+  margin-top: -1rem;
+  font-size: 0.95rem;
+}
+
+.difficulty-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.difficulty-buttons button {
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.9rem 1.6rem;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+}
+
+.difficulty-buttons button:active {
+  transform: scale(0.96);
+}
+
+.difficulty-buttons button.easy {
+  border-color: #57cc99;
+}
+.difficulty-buttons button.medium {
+  border-color: #ffd60a;
+}
+.difficulty-buttons button.hard {
+  border-color: #e5383b;
+}
+
+.hidden {
+  display: none !important;
+}
