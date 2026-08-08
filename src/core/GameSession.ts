@@ -8,6 +8,7 @@ import { DEFAULT_TIMING_WINDOWS } from "./TimingConfiguration";
 import { classifyDelta, maxJudgeableWindowSeconds } from "./TimingEngine";
 import { ScoreEngine } from "./ScoreEngine";
 import { ComboEngine } from "./ComboEngine";
+import { OverdriveEngine } from "./OverdriveEngine";
 import type { GameState } from "./GameState";
 
 export interface JudgmentEvent {
@@ -31,6 +32,7 @@ export class GameSession {
   readonly notes: NoteRuntime[];
   readonly scoreEngine = new ScoreEngine();
   readonly comboEngine = new ComboEngine();
+  readonly overdriveEngine = new OverdriveEngine();
   state: GameState = "countdown";
 
   private judgmentListeners: JudgmentListener[] = [];
@@ -52,6 +54,17 @@ export class GameSession {
 
   get laneCount(): number {
     return this.laneConfig.laneCount;
+  }
+
+  /** Combo multiplier with the Overdrive bonus folded in — what scoring actually uses. */
+  get effectiveMultiplier(): number {
+    return this.comboEngine.multiplier * this.overdriveEngine.scoreMultiplierBonus;
+  }
+
+  /** Returns true if the player successfully activated Overdrive. */
+  activateOverdrive(): boolean {
+    if (this.state !== "playing") return false;
+    return this.overdriveEngine.activate();
   }
 
   onJudgment(listener: JudgmentListener): void {
@@ -82,13 +95,16 @@ export class GameSession {
     }
     this.scoreEngine.reset();
     this.comboEngine.reset();
+    this.overdriveEngine.reset();
     this.state = "playing";
     this.clock.restart();
   }
 
-  /** Call once per frame. Sweeps past-window notes into misses. */
-  update(): void {
+  /** Call once per frame with the frame's elapsed seconds. Sweeps past-window notes into misses and drains Overdrive. */
+  update(dtSeconds: number): void {
     if (this.state !== "playing") return;
+    this.overdriveEngine.update(dtSeconds);
+
     const now = this.clock.currentTime;
     for (const note of this.notes) {
       if (note.hit || note.missed) continue;
@@ -125,8 +141,10 @@ export class GameSession {
 
     candidate.hit = true;
     this.comboEngine.registerHit();
-    const multiplier = this.comboEngine.multiplier;
-    const pointsGained = this.scoreEngine.applyJudgment(judgment, multiplier);
+    if (candidate.type === "special") {
+      this.overdriveEngine.chargeFromSpecialHit();
+    }
+    const pointsGained = this.scoreEngine.applyJudgment(judgment, this.effectiveMultiplier);
 
     return this.emitJudgment(judgment, candidate, delta, pointsGained);
   }
@@ -144,7 +162,7 @@ export class GameSession {
       deltaSeconds,
       pointsGained,
       combo: this.comboEngine.combo,
-      multiplier: this.comboEngine.multiplier,
+      multiplier: this.effectiveMultiplier,
     };
     for (const listener of this.judgmentListeners) listener(event);
     return event;

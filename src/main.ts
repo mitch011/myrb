@@ -13,6 +13,7 @@ import { AudioEngine } from "@audio/AudioEngine";
 import { SongPlayer } from "@audio/SongPlayer";
 import { AudioSyncManager } from "@audio/AudioSyncManager";
 import { synthesizeTestBeat } from "@audio/TestBeatSynth";
+import { requestMotionPermission } from "@input/MotionManager";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
@@ -74,6 +75,10 @@ async function startGame(difficulty: Difficulty): Promise<void> {
   for (const button of buttons) button.disabled = true;
   subtitle.textContent = "Loading…";
 
+  // Request motion permission first, as close to the click as possible —
+  // iOS is stricter about this counting as "from a user gesture" than it is
+  // about resuming the AudioContext.
+  const motionGranted = await requestMotionPermission();
   const clock = await createClock();
 
   difficultySelect.classList.add("hidden");
@@ -87,6 +92,7 @@ async function startGame(difficulty: Difficulty): Promise<void> {
   activeScene?.destroy();
   activeScene = new RhythmGameScene(canvas, session, DRUM_LANES);
   activeScene.start();
+  if (motionGranted) activeScene.enableMotion();
 
   document.title = `Rock Band Web — ${difficultyLabel(difficulty)}`;
 }

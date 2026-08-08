@@ -3,14 +3,18 @@ import type { LaneConfiguration } from "@chart/LaneConfiguration";
 import { computeLanes, type LaneGeometry } from "./Lane";
 import { computeHighwayGeometry, type HighwayGeometry } from "./HitZone";
 import { DEFAULT_LEAD_TIME_SECONDS, drawNote, noteProgress, noteY } from "./NoteRenderer";
-import { DrumPad } from "./DrumPad";
+import { DrumPad, rectContains, type Rect } from "./DrumPad";
 import { FeedbackRenderer } from "./FeedbackRenderer";
 import { ParticleEffects } from "./ParticleEffects";
 import { countdownLabel } from "./Countdown";
 import { TouchInputManager } from "@input/TouchInputManager";
+import { MotionManager } from "@input/MotionManager";
+import { HAPTIC_PATTERNS, vibrate } from "@input/Haptics";
 
 const PAD_GAP = 10;
 const PAD_MARGIN = 14;
+const OVERDRIVE_BUTTON_WIDTH_FRACTION = 0.5;
+const OVERDRIVE_BUTTON_HEIGHT_FRACTION = 0.08;
 
 export class RhythmGameScene {
   private readonly ctx: CanvasRenderingContext2D;
@@ -20,6 +24,8 @@ export class RhythmGameScene {
   private readonly feedback = new FeedbackRenderer();
   private readonly particles = new ParticleEffects();
   private input: TouchInputManager;
+  private readonly motion: MotionManager;
+  private overdriveButtonRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
   private lastFrameMs = 0;
   private rafId = 0;
 
@@ -41,6 +47,8 @@ export class RhythmGameScene {
     window.visualViewport?.addEventListener("resize", this.resize);
 
     this.input = new TouchInputManager(canvas, this.pads, this.handlePadDown, this.handlePadUp);
+    this.motion = new MotionManager(this.handleFlick);
+    canvas.addEventListener("pointerdown", this.handleOverdriveButtonPointerDown);
     this.session.onJudgment(this.handleJudgment);
   }
 
@@ -50,10 +58,17 @@ export class RhythmGameScene {
     this.rafId = requestAnimationFrame(this.loop);
   }
 
+  /** Call after the caller has obtained motion permission (iOS requires a user-gesture prompt first). */
+  enableMotion(): void {
+    this.motion.start();
+  }
+
   destroy(): void {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener("resize", this.resize);
     window.visualViewport?.removeEventListener("resize", this.resize);
+    this.canvas.removeEventListener("pointerdown", this.handleOverdriveButtonPointerDown);
+    this.motion.stop();
     this.input.destroy();
   }
 
@@ -68,6 +83,15 @@ export class RhythmGameScene {
     this.lanes = computeLanes(width, this.laneConfig.laneCount);
     this.highway = computeHighwayGeometry(height);
     this.layoutPads(width, height);
+
+    const buttonWidth = width * OVERDRIVE_BUTTON_WIDTH_FRACTION;
+    const buttonHeight = height * OVERDRIVE_BUTTON_HEIGHT_FRACTION;
+    this.overdriveButtonRect = {
+      x: (width - buttonWidth) / 2,
+      y: this.highway.topY * 0.15,
+      width: buttonWidth,
+      height: buttonHeight,
+    };
   };
 
   private layoutPads(canvasWidth: number, canvasHeight: number): void {
@@ -116,14 +140,34 @@ export class RhythmGameScene {
         this.laneConfig.laneColors[event.lane],
         nowMs
       );
+      vibrate(event.judgment === "perfect" ? HAPTIC_PATTERNS.perfect : HAPTIC_PATTERNS.hit);
     }
   };
+
+  private handleFlick = (): void => {
+    this.tryActivateOverdrive();
+  };
+
+  private handleOverdriveButtonPointerDown = (event: PointerEvent): void => {
+    const bounds = this.canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    if (rectContains(this.overdriveButtonRect, x, y)) {
+      this.tryActivateOverdrive();
+    }
+  };
+
+  private tryActivateOverdrive(): void {
+    if (this.session.activateOverdrive()) {
+      vibrate(HAPTIC_PATTERNS.overdriveActivate);
+    }
+  }
 
   private loop = (nowMs: number): void => {
     const dtSeconds = this.lastFrameMs ? (nowMs - this.lastFrameMs) / 1000 : 0;
     this.lastFrameMs = nowMs;
 
-    this.session.update();
+    this.session.update(dtSeconds);
     this.feedback.update(nowMs);
     this.particles.update(nowMs, dtSeconds);
     this.render(nowMs);
@@ -168,9 +212,15 @@ export class RhythmGameScene {
   private drawStage(width: number, height: number): void {
     const ctx = this.ctx;
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, "#0a0a16");
-    gradient.addColorStop(0.6, "#12121f");
-    gradient.addColorStop(1, "#050508");
+    if (this.session.overdriveEngine.isActive) {
+      gradient.addColorStop(0, "#2a1638");
+      gradient.addColorStop(0.6, "#1c1030");
+      gradient.addColorStop(1, "#0a0714");
+    } else {
+      gradient.addColorStop(0, "#0a0a16");
+      gradient.addColorStop(0.6, "#12121f");
+      gradient.addColorStop(1, "#050508");
+    }
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
   }
@@ -227,7 +277,7 @@ export class RhythmGameScene {
     const ctx = this.ctx;
     const score = this.session.scoreEngine.score;
     const combo = this.session.comboEngine.combo;
-    const multiplier = this.session.comboEngine.multiplier;
+    const multiplier = this.session.effectiveMultiplier;
 
     ctx.save();
     ctx.textBaseline = "top";
@@ -237,7 +287,7 @@ export class RhythmGameScene {
     ctx.fillText(String(score).padStart(6, "0"), 16, 12);
 
     ctx.textAlign = "right";
-    ctx.fillStyle = multiplier >= 4 ? "#ffd60a" : "#ffffff";
+    ctx.fillStyle = this.session.overdriveEngine.isActive ? "#ff5fd8" : multiplier >= 4 ? "#ffd60a" : "#ffffff";
     ctx.fillText(`${multiplier}X`, width - 16, 12);
 
     if (combo > 0) {
@@ -247,5 +297,78 @@ export class RhythmGameScene {
       ctx.fillText(`COMBO x${combo}`, 16, 44);
     }
     ctx.restore();
+
+    this.drawOverdriveIndicator();
   }
+
+  private drawOverdriveIndicator(): void {
+    const ctx = this.ctx;
+    const overdrive = this.session.overdriveEngine;
+    const rect = this.overdriveButtonRect;
+
+    if (overdrive.isActive) {
+      ctx.save();
+      ctx.fillStyle = "#ff5fd8";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `bold ${Math.round(rect.height * 0.7)}px system-ui, sans-serif`;
+      ctx.shadowColor = "#ff5fd8";
+      ctx.shadowBlur = 14;
+      ctx.fillText("OVERDRIVE!", rect.x + rect.width / 2, rect.y + rect.height / 2);
+      ctx.restore();
+      return;
+    }
+
+    if (overdrive.isReady) {
+      const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 150);
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      roundedRect(ctx, rect.x, rect.y, rect.width, rect.height, rect.height / 2);
+      ctx.fillStyle = "#ffd60a";
+      ctx.shadowColor = "#ffd60a";
+      ctx.shadowBlur = 16;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#1a1a1a";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `bold ${Math.round(rect.height * 0.55)}px system-ui, sans-serif`;
+      ctx.fillText("OVERDRIVE READY", rect.x + rect.width / 2, rect.y + rect.height / 2);
+      ctx.restore();
+      return;
+    }
+
+    // Charging: a thin outlined meter bar showing progress toward ready.
+    ctx.save();
+    roundedRect(ctx, rect.x, rect.y, rect.width, rect.height, rect.height / 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const fillWidth = rect.width * overdrive.meterFraction;
+    if (fillWidth > 0) {
+      roundedRect(ctx, rect.x, rect.y, fillWidth, rect.height, rect.height / 2);
+      ctx.fillStyle = "#4cc9f0";
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
 }
