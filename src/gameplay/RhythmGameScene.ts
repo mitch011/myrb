@@ -1,7 +1,7 @@
 import type { GameSession, JudgmentEvent } from "@core/GameSession";
 import type { PlayStats } from "@models/Score";
 import type { LaneConfiguration } from "@chart/LaneConfiguration";
-import { computeLanes, laneAtProgress, laneBoundaryX, type LaneGeometry } from "./Lane";
+import { computeLanes, type LaneGeometry } from "./Lane";
 import { computeHighwayGeometry, type HighwayGeometry } from "./HitZone";
 import { DEFAULT_LEAD_TIME_SECONDS, drawNote, noteProgress, noteY } from "./NoteRenderer";
 import { DrumPad, rectContains, type Rect } from "./DrumPad";
@@ -12,11 +12,18 @@ import { roundedRect } from "./CanvasShapes";
 import { TouchInputManager } from "@input/TouchInputManager";
 import { MotionManager } from "@input/MotionManager";
 import { HAPTIC_PATTERNS, vibrate } from "@input/Haptics";
+import { DrumHitSynth } from "@audio/DrumHitSynth";
 
 const PAD_GAP = 10;
 const PAD_MARGIN = 14;
 const OVERDRIVE_BUTTON_WIDTH_FRACTION = 0.5;
 const OVERDRIVE_BUTTON_HEIGHT_FRACTION = 0.08;
+
+export interface RhythmGameSceneOptions {
+  onEnd?: (result: PlayStats, failed: boolean) => void;
+  /** Enables synthesized drum-hit sound effects on successful taps. Omit for a silent fallback (no clock audio available). */
+  audioContext?: AudioContext;
+}
 
 export class RhythmGameScene {
   private readonly ctx: CanvasRenderingContext2D;
@@ -25,6 +32,8 @@ export class RhythmGameScene {
   private pads: DrumPad[] = [];
   private readonly feedback = new FeedbackRenderer();
   private readonly particles = new ParticleEffects();
+  private readonly drumHitSynth: DrumHitSynth | null;
+  private readonly onEnd?: (result: PlayStats, failed: boolean) => void;
   private input: TouchInputManager;
   private readonly motion: MotionManager;
   private overdriveButtonRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
@@ -36,8 +45,11 @@ export class RhythmGameScene {
     private readonly canvas: HTMLCanvasElement,
     private readonly session: GameSession,
     private readonly laneConfig: LaneConfiguration,
-    private readonly onEnd?: (result: PlayStats, failed: boolean) => void
+    options: RhythmGameSceneOptions = {}
   ) {
+    this.onEnd = options.onEnd;
+    this.drumHitSynth = options.audioContext ? new DrumHitSynth(options.audioContext) : null;
+
     const context = canvas.getContext("2d");
     if (!context) throw new Error("2D canvas context is not available.");
     this.ctx = context;
@@ -150,6 +162,7 @@ export class RhythmGameScene {
         nowMs
       );
       vibrate(event.judgment === "perfect" ? HAPTIC_PATTERNS.perfect : HAPTIC_PATTERNS.hit);
+      this.drumHitSynth?.playLaneHit(event.lane);
     }
   };
 
@@ -305,40 +318,27 @@ export class RhythmGameScene {
   private drawHighway(width: number): void {
     const ctx = this.ctx;
     const { topY, hitZoneY } = this.highway;
-    const laneCount = this.laneConfig.laneCount;
 
-    // Lane fills as trapezoid quads — wide at the top, narrow at the hit line.
-    for (let i = 0; i < laneCount; i++) {
-      const topLeft = laneBoundaryX(width, laneCount, i, 0);
-      const topRight = laneBoundaryX(width, laneCount, i + 1, 0);
-      const bottomLeft = laneBoundaryX(width, laneCount, i, 1);
-      const bottomRight = laneBoundaryX(width, laneCount, i + 1, 1);
-
+    for (const lane of this.lanes) {
       ctx.save();
       ctx.globalAlpha = 0.1;
-      ctx.fillStyle = this.laneConfig.laneColors[i];
-      ctx.beginPath();
-      ctx.moveTo(topLeft, topY);
-      ctx.lineTo(topRight, topY);
-      ctx.lineTo(bottomRight, hitZoneY);
-      ctx.lineTo(bottomLeft, hitZoneY);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillStyle = this.laneConfig.laneColors[lane.index];
+      ctx.fillRect(lane.x, topY, lane.width, hitZoneY - topY);
       ctx.restore();
-    }
 
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i <= laneCount; i++) {
-      const top = laneBoundaryX(width, laneCount, i, 0);
-      const bottom = laneBoundaryX(width, laneCount, i, 1);
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(top, topY);
-      ctx.lineTo(bottom, hitZoneY);
+      ctx.moveTo(lane.x, topY);
+      ctx.lineTo(lane.x, hitZoneY);
       ctx.stroke();
     }
+    ctx.beginPath();
+    ctx.moveTo(width, topY);
+    ctx.lineTo(width, hitZoneY);
+    ctx.stroke();
 
-    this.drawHighwayBorder(width, topY, hitZoneY);
+    this.drawHighwayBorder(topY, hitZoneY);
 
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.85)";
@@ -346,31 +346,34 @@ export class RhythmGameScene {
     ctx.shadowColor = "#ffffff";
     ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.moveTo(laneBoundaryX(width, laneCount, 0, 1), hitZoneY);
-    ctx.lineTo(laneBoundaryX(width, laneCount, laneCount, 1), hitZoneY);
+    ctx.moveTo(0, hitZoneY);
+    ctx.lineTo(width, hitZoneY);
     ctx.stroke();
     ctx.restore();
   }
 
   /** Original scalloped gold trim along the outer highway edges — decorative flourish, not copied artwork. */
-  private drawHighwayBorder(width: number, topY: number, hitZoneY: number): void {
+  private drawHighwayBorder(topY: number, hitZoneY: number): void {
     const ctx = this.ctx;
-    const laneCount = this.laneConfig.laneCount;
     const segments = 16;
+    const leftEdge = this.lanes[0]?.x ?? 0;
+    const rightEdge = this.lanes[this.lanes.length - 1]
+      ? this.lanes[this.lanes.length - 1].x + this.lanes[this.lanes.length - 1].width
+      : 0;
 
     ctx.save();
-    for (const side of [0, laneCount]) {
-      const direction = side === 0 ? -1 : 1;
+    for (const [edgeX, direction] of [
+      [leftEdge, -1],
+      [rightEdge, 1],
+    ] as const) {
       for (let s = 0; s <= segments; s++) {
         const t = s / segments;
         const y = topY + t * (hitZoneY - topY);
-        const edgeX = laneBoundaryX(width, laneCount, side, t);
         const wobble = Math.sin(t * Math.PI * 7) * 4;
         const dotX = edgeX + direction * (6 + wobble);
-        const radius = 1.5 + (1 - t) * 2;
 
         ctx.beginPath();
-        ctx.arc(dotX, y, radius, 0, Math.PI * 2);
+        ctx.arc(dotX, y, 2.2, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(212,175,55,0.45)";
         ctx.fill();
       }
@@ -380,14 +383,12 @@ export class RhythmGameScene {
 
   private drawNotes(): void {
     const currentTime = this.session.currentTime;
-    const width = this.canvas.clientWidth;
     for (const note of this.session.notes) {
       if (note.hit || note.missed) continue;
       const progress = noteProgress(note, currentTime, DEFAULT_LEAD_TIME_SECONDS);
       if (progress < -0.05 || progress > 1.05) continue;
 
-      const clampedProgress = Math.max(0, Math.min(1, progress));
-      const lane = laneAtProgress(width, this.laneConfig.laneCount, note.lane, clampedProgress);
+      const lane = this.lanes[note.lane];
       const y = noteY(progress, this.highway);
       drawNote(this.ctx, lane, y, this.laneConfig.laneColors[note.lane], note.type === "special");
     }

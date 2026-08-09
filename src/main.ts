@@ -365,7 +365,10 @@ async function startGame(difficulty: Difficulty): Promise<void> {
   });
 
   activeScene?.destroy();
-  activeScene = new RhythmGameScene(canvas, session, DRUM_LANES, showResults);
+  activeScene = new RhythmGameScene(canvas, session, DRUM_LANES, {
+    onEnd: showResults,
+    audioContext: audioEngine?.context,
+  });
   activeScene.start();
   if (motionGranted) activeScene.enableMotion();
 

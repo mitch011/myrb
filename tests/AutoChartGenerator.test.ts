@@ -11,7 +11,7 @@ describe("generateAutoChart", () => {
   it("maps low/mid/high bands to lanes 0/1/2", () => {
     // A louder padding onset keeps these three safely out of the "top 10%"
     // special bucket, which would otherwise reroute them to the accent lane.
-    const onsets = [onset(0, "low", 0.1), onset(1, "mid", 0.1), onset(2, "high", 0.1), onset(10, "low", 0.9)];
+    const onsets = [onset(0, "low", 0.3), onset(1, "mid", 0.3), onset(2, "high", 0.3), onset(10, "low", 0.95)];
     const { hard } = generateAutoChart(onsets, DRUM_LANES);
     const nonSpecialLanes = hard.filter((n) => n.type !== "special").map((n) => n.lane);
     expect(nonSpecialLanes).toEqual([0, 1, 2]);
@@ -36,11 +36,11 @@ describe("generateAutoChart", () => {
 
   it("thins Medium so a single lane never fires faster than the gap, but allows cross-lane chords", () => {
     const onsets = [
-      onset(0, "low", 0.1),
-      onset(0.05, "low", 0.1), // too close to the previous low hit — should be dropped
-      onset(0.05, "high", 0.1), // same instant, different lane — should survive (a chord)
-      onset(0.3, "low", 0.1),
-      onset(10, "low", 0.9), // padding, see comment above
+      onset(0, "low", 0.3),
+      onset(0.05, "low", 0.3), // too close to the previous low hit — should be dropped
+      onset(0.05, "high", 0.3), // same instant, different lane — should survive (a chord)
+      onset(0.3, "low", 0.3),
+      onset(10, "low", 0.95), // padding, see comment above
     ];
     const { medium } = generateAutoChart(onsets, DRUM_LANES);
     const lowHits = medium.filter((n) => n.lane === 0);
@@ -58,6 +58,12 @@ describe("generateAutoChart", () => {
     for (let i = 1; i < easy.length; i++) {
       expect(easy[i].timestamp - easy[i - 1].timestamp).toBeGreaterThanOrEqual(0.35);
     }
+  });
+
+  it("drops very weak onsets entirely, even on Hard", () => {
+    const onsets = [onset(0, "low", 0.05), onset(0.5, "low", 0.1), onset(1.0, "low", 0.9)];
+    const { hard } = generateAutoChart(onsets, DRUM_LANES);
+    expect(hard.map((n) => n.timestamp)).toEqual([1.0]);
   });
 
   it("produces fewer or equal notes going Hard -> Medium -> Easy", () => {
