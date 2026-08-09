@@ -148,8 +148,10 @@ export class GameSession {
 
     if (this.performanceMeter.hasFailed) {
       this.state = "failed";
+      this.clock.pause();
     } else if (this.isChartComplete()) {
       this.state = "finished";
+      this.clock.pause();
     }
   }
 

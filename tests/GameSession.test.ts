@@ -4,6 +4,7 @@ import type { SongClock } from "@core/GameClock";
 import { DRUM_LANES } from "@chart/LaneConfiguration";
 import type { Note } from "@chart/Note";
 import { DEFAULT_OVERDRIVE_CONFIG } from "@core/OverdriveConfiguration";
+import { DEFAULT_PERFORMANCE_CONFIG } from "@core/PerformanceMeter";
 
 class ManualClock implements SongClock {
   currentTime = 0;
@@ -66,5 +67,37 @@ describe("GameSession Overdrive integration", () => {
     const clock = new ManualClock();
     const session = new GameSession([specialNote(0, 1.0)], clock, DRUM_LANES);
     expect(session.activateOverdrive()).toBe(false);
+  });
+});
+
+describe("GameSession stops the clock when the song ends", () => {
+  it("pauses the clock once every note is resolved (finished)", () => {
+    const clock = new ManualClock();
+    const notes = [specialNote(0, 1.0)];
+    const session = new GameSession(notes, clock, DRUM_LANES);
+    session.start();
+
+    clock.currentTime = 1.0;
+    session.handleHit(0);
+    session.update(0);
+
+    expect(session.state).toBe("finished");
+    expect(clock.isPlaying).toBe(false);
+  });
+
+  it("pauses the clock when the player fails", () => {
+    const clock = new ManualClock();
+    const missesToFail = Math.ceil(
+      DEFAULT_PERFORMANCE_CONFIG.startingHealth / -DEFAULT_PERFORMANCE_CONFIG.gain.miss
+    );
+    const notes = Array.from({ length: missesToFail }, (_, i) => specialNote(0, i));
+    const session = new GameSession(notes, clock, DRUM_LANES);
+    session.start();
+
+    clock.currentTime = 1000; // every note is now well past its hit window
+    session.update(0);
+
+    expect(session.state).toBe("failed");
+    expect(clock.isPlaying).toBe(false);
   });
 });

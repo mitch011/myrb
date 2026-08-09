@@ -74,6 +74,11 @@ export class RhythmGameScene {
     this.canvas.removeEventListener("pointerdown", this.handleOverdriveButtonPointerDown);
     this.motion.stop();
     this.input.destroy();
+    // Belt-and-suspenders: GameSession already pauses (stops) the clock when
+    // a song finishes/fails, but if a scene is torn down mid-song (e.g. a
+    // future quit/pause-menu path, or switching songs mid-play) this is what
+    // stops audio from continuing in the background.
+    this.session.pause();
   }
 
   private resize = (): void => {
