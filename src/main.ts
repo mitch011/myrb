@@ -32,7 +32,12 @@ app.innerHTML = `
       <div class="subtitle">Choose a song</div>
       <div class="action-buttons" id="song-list"></div>
       <button class="text-button" id="upload-song-button">UPLOAD A SONG</button>
-      <input type="file" id="song-file-input" accept="audio/*" class="hidden" />
+      <input
+        type="file"
+        id="song-file-input"
+        accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.webm"
+        class="hidden"
+      />
       <button class="text-button" id="settings-open-from-songs">SETTINGS</button>
     </div>
 
