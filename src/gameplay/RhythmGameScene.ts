@@ -191,7 +191,7 @@ export class RhythmGameScene {
     const ctx = this.ctx;
 
     ctx.clearRect(0, 0, width, height);
-    this.drawStage(width, height);
+    this.drawStage(width, height, nowMs);
     this.drawHighway(width);
     this.drawNotes();
     for (const pad of this.pads) pad.draw(ctx, nowMs);
@@ -233,7 +233,7 @@ export class RhythmGameScene {
     ctx.restore();
   }
 
-  private drawStage(width: number, height: number): void {
+  private drawStage(width: number, height: number, nowMs: number): void {
     const ctx = this.ctx;
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     if (this.session.overdriveEngine.isActive) {
@@ -247,6 +247,53 @@ export class RhythmGameScene {
     }
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
+
+    this.drawSpotlights(width, height, nowMs);
+    this.drawCrowdSilhouette(width);
+  }
+
+  private drawSpotlights(width: number, height: number, nowMs: number): void {
+    const ctx = this.ctx;
+    const overdrive = this.session.overdriveEngine.isActive;
+    const colors: [string, string] = overdrive ? ["#ff5fd8", "#4cc9f0"] : ["#4cc9f0", "#e5383b"];
+    const sweep = Math.sin(nowMs / 4500) * width * 0.18;
+    const radius = width * 0.55;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const [index, color] of colors.entries()) {
+      const cx = width * (index === 0 ? 0.2 : 0.8) + sweep * (index === 0 ? 1 : -1);
+      const cy = height * 0.05;
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      gradient.addColorStop(0, hexToRgba(color, 0.16));
+      gradient.addColorStop(1, hexToRgba(color, 0));
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height * 0.75);
+    }
+    ctx.restore();
+  }
+
+  private drawCrowdSilhouette(width: number): void {
+    const ctx = this.ctx;
+    const bandTop = this.highway.topY * 0.15;
+    const bandHeight = this.highway.topY * 0.55;
+    const bumpCount = 22;
+    const bumpWidth = width / bumpCount;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    for (let i = 0; i < bumpCount; i++) {
+      // Deterministic pseudo-randomness from a fixed seed pattern, not
+      // Math.random(), so the silhouette doesn't reflicker every frame.
+      const bump = 0.5 + 0.5 * Math.sin(i * 12.9898);
+      const bumpH = bandHeight * (0.4 + bump * 0.6);
+      const cx = i * bumpWidth + bumpWidth / 2;
+      const cy = bandTop + bandHeight - bumpH / 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, bumpWidth * 0.55, bumpH / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   private drawHighway(width: number): void {
@@ -410,4 +457,12 @@ function roundedRect(
   ctx.arcTo(x, y + height, x, y, r);
   ctx.arcTo(x, y, x + width, y, r);
   ctx.closePath();
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const value = parseInt(hex.slice(1), 16);
+  const r = (value >> 16) & 0xff;
+  const g = (value >> 8) & 0xff;
+  const b = value & 0xff;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
