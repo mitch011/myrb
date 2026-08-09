@@ -84,6 +84,27 @@ describe("detectOnsets", () => {
     expect(maxEnergy).toBeCloseTo(1, 5);
   });
 
+  it("still classifies a hihat correctly over a loud sustained low-frequency backdrop", () => {
+    // Regression test for a real failure: a loud sustained rhythm-guitar
+    // wall (modeled here as a continuous low-frequency drone) used to make
+    // absolute low-band energy dominate every onset for the rest of the
+    // song, collapsing every lane to "low". Flux-based classification
+    // should still see the hihat's high-frequency jump on top of it.
+    const samples = new Float32Array(SAMPLE_RATE * 2);
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] += 0.5 * Math.sin((2 * Math.PI * 200 * i) / SAMPLE_RATE);
+    }
+    const hihatTimes = [1.0, 1.3, 1.6];
+    for (const time of hihatTimes) addBurst(samples, time, 7000, 0.6, 60);
+
+    const { onsets } = detectOnsets(samples, SAMPLE_RATE);
+    for (const time of hihatTimes) {
+      const match = nearestOnset(onsets, time);
+      expect(match, `expected an onset near t=${time}`).toBeDefined();
+      expect(match!.band).toBe("high");
+    }
+  });
+
   it("estimates a plausible BPM from a regular beat", () => {
     const samples = new Float32Array(SAMPLE_RATE * 2);
     for (const time of [0.1, 0.6, 1.1, 1.6]) addBurst(samples, time, 80, 0.9, 25);

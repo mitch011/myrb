@@ -73,10 +73,12 @@ export function detectOnsets(samples: Float32Array, sampleRate: number): OnsetDe
 
     if (onsetStrength[i] > threshold && isLocalMax && time - lastOnsetTime >= MIN_GAP_SECONDS) {
       lastOnsetTime = time;
+      const lowFlux = Math.max(0, lowEnergy[i] - lowEnergy[i - 1]);
+      const highFlux = Math.max(0, highEnergy[i] - highEnergy[i - 1]);
       onsets.push({
         time,
         energy: fullEnergy[i],
-        band: classifyBand(lowEnergy[i], highEnergy[i], fullEnergy[i]),
+        band: classifyBand(lowFlux, highFlux, onsetStrength[i]),
       });
     }
   }
@@ -106,10 +108,19 @@ function meanAndStd(data: Float32Array, start: number, end: number): { mean: num
   return { mean, std: Math.sqrt(variance / count) };
 }
 
-function classifyBand(low: number, high: number, full: number): FrequencyBand {
+/**
+ * Classifies by how much each band's energy jumped AT this transient
+ * (flux), not by absolute band level. A loud sustained instrument (e.g. a
+ * distorted rhythm guitar wall) raises absolute low/mid energy for the rest
+ * of the song without necessarily contributing a fresh jump at any given
+ * instant, so flux-based comparison stays discriminative where absolute-
+ * level comparison would collapse everything into whichever band the
+ * backdrop happens to dominate.
+ */
+function classifyBand(lowFlux: number, highFlux: number, fullFlux: number): FrequencyBand {
   const epsilon = 1e-9;
-  const lowRatio = low / (full + epsilon);
-  const highRatio = high / (full + epsilon);
+  const lowRatio = lowFlux / (fullFlux + epsilon);
+  const highRatio = highFlux / (fullFlux + epsilon);
   if (lowRatio > highRatio * BAND_DOMINANCE_RATIO) return "low";
   if (highRatio > lowRatio * BAND_DOMINANCE_RATIO) return "high";
   return "mid";
