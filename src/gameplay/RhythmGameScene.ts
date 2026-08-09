@@ -1,13 +1,14 @@
 import type { GameSession, JudgmentEvent } from "@core/GameSession";
 import type { PlayStats } from "@models/Score";
 import type { LaneConfiguration } from "@chart/LaneConfiguration";
-import { computeLanes, type LaneGeometry } from "./Lane";
+import { computeLanes, laneAtProgress, laneBoundaryX, type LaneGeometry } from "./Lane";
 import { computeHighwayGeometry, type HighwayGeometry } from "./HitZone";
 import { DEFAULT_LEAD_TIME_SECONDS, drawNote, noteProgress, noteY } from "./NoteRenderer";
 import { DrumPad, rectContains, type Rect } from "./DrumPad";
 import { FeedbackRenderer } from "./FeedbackRenderer";
 import { ParticleEffects } from "./ParticleEffects";
 import { countdownLabel } from "./Countdown";
+import { roundedRect } from "./CanvasShapes";
 import { TouchInputManager } from "@input/TouchInputManager";
 import { MotionManager } from "@input/MotionManager";
 import { HAPTIC_PATTERNS, vibrate } from "@input/Haptics";
@@ -299,25 +300,40 @@ export class RhythmGameScene {
   private drawHighway(width: number): void {
     const ctx = this.ctx;
     const { topY, hitZoneY } = this.highway;
+    const laneCount = this.laneConfig.laneCount;
 
-    for (const lane of this.lanes) {
+    // Lane fills as trapezoid quads — wide at the top, narrow at the hit line.
+    for (let i = 0; i < laneCount; i++) {
+      const topLeft = laneBoundaryX(width, laneCount, i, 0);
+      const topRight = laneBoundaryX(width, laneCount, i + 1, 0);
+      const bottomLeft = laneBoundaryX(width, laneCount, i, 1);
+      const bottomRight = laneBoundaryX(width, laneCount, i + 1, 1);
+
       ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.fillStyle = this.laneConfig.laneColors[lane.index];
-      ctx.fillRect(lane.x, topY, lane.width, hitZoneY - topY);
-      ctx.restore();
-
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = this.laneConfig.laneColors[i];
       ctx.beginPath();
-      ctx.moveTo(lane.x, topY);
-      ctx.lineTo(lane.x, hitZoneY);
+      ctx.moveTo(topLeft, topY);
+      ctx.lineTo(topRight, topY);
+      ctx.lineTo(bottomRight, hitZoneY);
+      ctx.lineTo(bottomLeft, hitZoneY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i <= laneCount; i++) {
+      const top = laneBoundaryX(width, laneCount, i, 0);
+      const bottom = laneBoundaryX(width, laneCount, i, 1);
+      ctx.beginPath();
+      ctx.moveTo(top, topY);
+      ctx.lineTo(bottom, hitZoneY);
       ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.beginPath();
-    ctx.moveTo(width, topY);
-    ctx.lineTo(width, hitZoneY);
-    ctx.stroke();
+
+    this.drawHighwayBorder(width, topY, hitZoneY);
 
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.85)";
@@ -325,20 +341,48 @@ export class RhythmGameScene {
     ctx.shadowColor = "#ffffff";
     ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.moveTo(0, hitZoneY);
-    ctx.lineTo(width, hitZoneY);
+    ctx.moveTo(laneBoundaryX(width, laneCount, 0, 1), hitZoneY);
+    ctx.lineTo(laneBoundaryX(width, laneCount, laneCount, 1), hitZoneY);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Original scalloped gold trim along the outer highway edges — decorative flourish, not copied artwork. */
+  private drawHighwayBorder(width: number, topY: number, hitZoneY: number): void {
+    const ctx = this.ctx;
+    const laneCount = this.laneConfig.laneCount;
+    const segments = 16;
+
+    ctx.save();
+    for (const side of [0, laneCount]) {
+      const direction = side === 0 ? -1 : 1;
+      for (let s = 0; s <= segments; s++) {
+        const t = s / segments;
+        const y = topY + t * (hitZoneY - topY);
+        const edgeX = laneBoundaryX(width, laneCount, side, t);
+        const wobble = Math.sin(t * Math.PI * 7) * 4;
+        const dotX = edgeX + direction * (6 + wobble);
+        const radius = 1.5 + (1 - t) * 2;
+
+        ctx.beginPath();
+        ctx.arc(dotX, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(212,175,55,0.45)";
+        ctx.fill();
+      }
+    }
     ctx.restore();
   }
 
   private drawNotes(): void {
     const currentTime = this.session.currentTime;
+    const width = this.canvas.clientWidth;
     for (const note of this.session.notes) {
       if (note.hit || note.missed) continue;
       const progress = noteProgress(note, currentTime, DEFAULT_LEAD_TIME_SECONDS);
       if (progress < -0.05 || progress > 1.05) continue;
 
-      const lane = this.lanes[note.lane];
+      const clampedProgress = Math.max(0, Math.min(1, progress));
+      const lane = laneAtProgress(width, this.laneConfig.laneCount, note.lane, clampedProgress);
       const y = noteY(progress, this.highway);
       drawNote(this.ctx, lane, y, this.laneConfig.laneColors[note.lane], note.type === "special");
     }
@@ -369,21 +413,28 @@ export class RhythmGameScene {
     }
     ctx.restore();
 
-    this.drawPerformanceMeter(width);
+    this.drawPerformanceMeter();
     this.drawOverdriveIndicator();
   }
 
-  private drawPerformanceMeter(width: number): void {
+  /** A vertical rock-meter running alongside the highway, not a HUD strip. */
+  private drawPerformanceMeter(): void {
     const ctx = this.ctx;
     const fraction = this.session.performanceMeter.fraction;
-    const barHeight = 5;
+    const { topY, hitZoneY } = this.highway;
+    const barWidth = 6;
+    const x = 4;
+    const barHeight = hitZoneY - topY;
 
     ctx.save();
+    roundedRect(ctx, x, topY, barWidth, barHeight, barWidth / 2);
     ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.fillRect(0, 0, width, barHeight);
+    ctx.fill();
 
+    const filledHeight = barHeight * fraction;
+    roundedRect(ctx, x, topY + (barHeight - filledHeight), barWidth, filledHeight, barWidth / 2);
     ctx.fillStyle = fraction > 0.5 ? "#57cc99" : fraction > 0.25 ? "#ffd60a" : "#e5383b";
-    ctx.fillRect(0, 0, width * fraction, barHeight);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -439,24 +490,6 @@ export class RhythmGameScene {
     }
     ctx.restore();
   }
-}
-
-function roundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-): void {
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + width, y, x + width, y + height, r);
-  ctx.arcTo(x + width, y + height, x, y + height, r);
-  ctx.arcTo(x, y + height, x, y, r);
-  ctx.arcTo(x, y, x + width, y, r);
-  ctx.closePath();
 }
 
 function hexToRgba(hex: string, alpha: number): string {
